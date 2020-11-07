@@ -13,7 +13,7 @@
 #include <typeinfo>
 #include <typeindex>
 
-namespace clonixin::event {
+namespace clonixin::event::sync {
     /**
     ** \brief Clonixin's event Dispatcher
     **
@@ -36,15 +36,19 @@ namespace clonixin::event {
                 std::type_index type;
                 size_t id;
             };
+
+            struct callback_meta {
+                size_t id;
+                std::any fun;
+            };
         public:
             using handle = _CallbackHandle;
         public:
-
             Dispatcher() {}
             ~Dispatcher() {}
 
             template <class EvType>
-            void dispatchSync(EvType &&event) const;
+            void dispatch(EvType &&event) const;
 
             template <class EvType>
             handle registerCallback(std::function<void(EvType)> callback);
@@ -53,7 +57,7 @@ namespace clonixin::event {
 
         private:
             using callbackPair = std::pair<size_t, std::any>;
-            using callbackList = std::vector<callbackPair>;
+            using callbackList = std::vector<callback_meta>;
 
             std::unordered_map<std::type_index, callbackList> _callbacks;
             std::unordered_map<std::type_index, size_t> _id_list;
@@ -67,9 +71,9 @@ namespace clonixin::event {
     ** \tparam EvType Type that will contains the event data.
     */
     template <class EvType>
-    void Dispatcher::dispatchSync(EvType &&event) const {
-        auto unar = [&] (callbackPair pair) {
-            auto [id, fun] = pair;
+    void Dispatcher::dispatch(EvType &&event) const {
+        auto unar = [&] (callback_meta meta) {
+            auto [id, fun] = meta;
             std::any_cast<std::function<void(EvType)>>(fun)(event);
         };
 
@@ -106,8 +110,8 @@ namespace clonixin::event {
     */
     void Dispatcher::unregisterCallback(handle && hndl) {
         auto & list = _callbacks[hndl.type];
-        auto pos = find_if(list.begin(), list.end(), [&](callbackPair pair) {
-            return hndl.id == pair.first;
+        auto pos = find_if(list.begin(), list.end(), [&](callback_meta meta) {
+            return hndl.id == meta.id;
         });
 
         list.erase(pos);
