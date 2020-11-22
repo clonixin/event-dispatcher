@@ -22,6 +22,15 @@
 #include <unordered_map>
 
 namespace clonixin::event::async {
+    /**
+    ** \brief Empty class tag type used to specify if the dispatcher should yield when the task is empty;
+    */
+    struct yield_t { explicit yield_t() = default; };
+
+    struct no_yield_t { explicit no_yield_t() = default; };
+
+    inline constexpr yield_t yield {}; ///< Authorize processing function to yield.
+    inline constexpr no_yield_t no_yield {}; ///< Authorize processing function to yield.
 
     /**
     ** \brief Event Dispatcher class.
@@ -97,13 +106,14 @@ namespace clonixin::event::async {
             Dispatcher();
             ~Dispatcher();
 
-            bool run();
+            bool run(no_yield_t);
+            bool run(yield_t = yield);
             template <class Rep, class Period>
             bool run(std::chrono::duration<Rep, Period> timeout);
             bool stop();
 
-            bool process();
-            bool processOrYield();
+            bool process(no_yield_t = no_yield);
+            bool process(yield_t t);
 
             template <class EvType>
             Dispatcher &pushEvent(EvType);
@@ -124,6 +134,11 @@ namespace clonixin::event::async {
             [[nodiscard]]
             std::future<Handle> registerCallback(CallbackFunction callback);
             std::future<void> unregisterCallback(Handle hndl);
+
+            template <class EvType, typename CallbackFunction>
+            [[nodiscard]]
+            Handle  registerCallbackSync(CallbackFunction callback);
+            void    unregisterCallbackSync(Handle hndl);
 
         private:
             bool _startThread(std::function<void()> fun);
@@ -194,9 +209,33 @@ namespace clonixin::event::async {
     **
     ** If a thread is already running, this function does nothing.
     **
+    ** \param t A tag to differentiate it from the non yielding function.
+    **
     ** \return \c true if a thread has been spawned, \c false otherwise.
     */
-    bool Dispatcher::run() {
+    bool Dispatcher::run(no_yield_t t) {
+        auto fun = [&] {
+            std::scoped_lock l(_process_mu);
+            while (_running.load()) {
+                _process();
+            }
+        };
+
+        return _startThread(fun);
+    }
+
+    /**
+    ** \brief Start a thread that will process tasks when available.
+    **
+    ** Calling this function result on a thread to be started, that will process tasks as soon as possible.
+    **
+    ** If a thread is already running, this function does nothing.
+    **
+    ** \param t A tag to differentiate it from the yielding function.
+    **
+    ** \return \c true if a thread has been spawned, \c false otherwise.
+    */
+    bool Dispatcher::run(yield_t t) {
         auto fun = [&] {
             std::scoped_lock l(_process_mu);
             while (_running.load()) {
@@ -262,6 +301,7 @@ namespace clonixin::event::async {
     }
 
     /**
+    ** \param t A tag to differentiate it from the yielding function.
     ** \brief Adds an event dispatching task.
     **
     ** \tparam EvType Type of the event that'll be dispatch on next call to process.
@@ -288,39 +328,17 @@ namespace clonixin::event::async {
     **
     ** \remarks Internally the function lock a mutex to prevent concurrent calls.
     **
+    ** \param t A tag to differentiate it from the non-yielding function.
+    **
     ** \return If no other call to process is running, returns \c true. \c false is returned otherwise.
     */
-    bool Dispatcher::process() {
+    bool Dispatcher::process(no_yield_t) {
         std::unique_lock locked(_process_mu, std::try_to_lock);
 
         if (locked)
             _process();
 
         return bool(locked);
-    }
-
-    /**
-    ** \brief Actual process implementation.
-    **
-    ** This function locks the tasks mutex long enough to swap the tasks queues.
-    ** Once done, the old pending task queue become the active one.
-    ** That queue then get processed by invoking all packaged_task it contains.
-    **
-    ** This function does not returns.
-    */
-    void Dispatcher::_process() {
-        int sel;
-        {
-            std::scoped_lock sl(_tasks_mu);
-            sel = _tasks_sel;
-            _tasks_sel ^= 1;
-        }
-
-        std::for_each(_tasks[sel].begin(), _tasks[sel].end(), [](auto &task) {
-            task();
-        });
-
-        _tasks[sel].clear();
     }
 
     /**
@@ -333,41 +351,18 @@ namespace clonixin::event::async {
     **
     ** \remarks Internally the function lock a mutex to prevent concurrent calls;
     **
+    ** \param t A tag to differentiate it from the yielding function.
+    **
     ** \return If no other call to process is running, returns \c true. \c false is returned otherwise.
     */
-    bool Dispatcher::processOrYield() {
+    bool Dispatcher::process(yield_t t) {
         std::unique_lock locked(_process_mu, std::try_to_lock);
+
 
         if (locked)
             _processOrYield();
 
         return bool(locked);
-    }
-
-    /**
-    ** \brief Actual processOrYield implementation.
-    **
-    ** This function locks the tasks mutex long enough to swap the tasks queues.
-    ** Once done, the old pending task queue become the active one.
-    ** That queue then get processed by invoking all packaged_task it contains.
-    ** If no tasks are contained in the active task queue, the calling thread is caused to yield.
-    **
-    ** This function does not returns.
-    */
-    void Dispatcher::_processOrYield() {
-        int sel;
-        {
-            std::scoped_lock sl(_tasks_mu);
-            sel = _tasks_sel;
-            _tasks_sel ^= 1;
-        }
-
-        if (0 != _tasks[sel].size())
-            std::for_each(_tasks[sel].begin(), _tasks[sel].end(), [](auto &task) { task(); });
-        else
-            std::this_thread::yield();
-
-        _tasks[sel].clear();
     }
     /**@}*/
 
@@ -459,9 +454,145 @@ namespace clonixin::event::async {
 
     /**
     ** \name Callback Management
+    */
+    /**@{*/
+    /**
+    ** \brief Adds a task to register the callback.
+    **
+    ** This function adds a new task to register a callback to a type of event, then returns a future on an handle.
+    **
+    ** \tparam EvType Type of events to register to.
+    ** \tparam CallbackFunction Type of the callback. CallbackFunction must be invocable with EvType.
+    **
+    ** \param [in] callback The callback that'll be called when an event EvType will be dispatched.
+    **
+    ** \return Returns an std::future<Dispatcher::Handle> that will contains the callback handle when it'll be registered.
+    */
+    template <class EvType, typename CallbackFunction>
+    std::future<Dispatcher::Handle> Dispatcher::registerCallback(CallbackFunction callback) {
+        static_assert(std::is_invocable_v<CallbackFunction, EvType>, "Callback should be invocable with EvType.");
+
+        auto doRegister = [&, callback] {
+            return _doRegister<EvType>(callback);
+        };
+
+        return _pushTask<Handle>(doRegister);
+    }
+
+    /**
+    ** \brief Adds a task to un-register a callback.
+    **
+    ** This function adds a new task that will unregister the callback represented by \c hndl.
+    **
+    ** \param [in] hndl A Dispatcher::Handle previously returned by Dispatcher::registerCallback.
+    **
+    ** \returns A std::future in case something threw in the unregistration process, and the user want to handle the exception.
+    */
+    std::future<void> Dispatcher::unregisterCallback(Handle hndl) {
+        std::function<void()> doUnregister = [&, hndl] {
+            try {
+                auto meta = _meta_list.at(hndl.type);
+                meta.unreg(hndl.id);
+            } catch (std::out_of_range) {}
+        };
+
+        return _pushTask<void>(doUnregister);
+    }
+
+    /**
+    ** \brief Adds a task to register the callback.
+    **
+    ** This function register a callback to a type of event, then returns its handle.
+    **
+    ** \warning This function should not be used if run() was called, or if another thread might call process.
+    **
+    ** \tparam EvType Type of events to register to.
+    ** \tparam CallbackFunction Type of the callback. CallbackFunction must be invocable with EvType.
+    **
+    ** \param [in] callback The callback that'll be called when an event EvType will be dispatched.
+    **
+    ** \return Returns a Dispatcher::Handle that will contains the callback handle when it'll be registered.
+    */
+    template <class EvType, typename CallbackFunction>
+    Dispatcher::Handle Dispatcher::registerCallbackSync(CallbackFunction callback) {
+        static_assert(std::is_invocable_v<CallbackFunction, EvType>, "Callback should be invocable with EvType.");
+
+        return _doRegister<EvType>(callback);
+    }
+
+    /**
+    ** \brief Adds a task to un-register a callback.
+    **
+    ** This function adds a new task that will unregister the callback represented by \c hndl.
+    **
+    ** \warning This function should not be used if run() was called, or if another thread might call process.
+    **
+    ** \param [in] hndl A Dispatcher::Handle previously returned by Dispatcher::registerCallback.
+    **
+    ** \returns A std::future in case something threw in the unregistration process, and the user want to handle the exception.
+    */
+    void Dispatcher::unregisterCallbackSync(Handle hndl) {
+        try {
+            auto meta = _meta_list.at(hndl.type);
+            meta.unreg(hndl.id);
+        } catch (std::out_of_range) {}
+    }
+    /**@}*/
+
+    /**
+    ** \name Private member functions
     ** \internal
     */
     /**@{*/
+    /**
+    ** \brief Actual process implementation.
+    **
+    ** This function locks the tasks mutex long enough to swap the tasks queues.
+    ** Once done, the old pending task queue become the active one.
+    ** That queue then get processed by invoking all packaged_task it contains.
+    **
+    ** This function does not returns.
+    */
+    void Dispatcher::_process() {
+        int sel;
+        {
+            std::scoped_lock sl(_tasks_mu);
+            sel = _tasks_sel;
+            _tasks_sel ^= 1;
+        }
+
+        std::for_each(_tasks[sel].begin(), _tasks[sel].end(), [](auto &task) {
+            task();
+        });
+
+        _tasks[sel].clear();
+    }
+
+    /**
+    ** \brief Actual processOrYield implementation.
+    **
+    ** This function locks the tasks mutex long enough to swap the tasks queues.
+    ** Once done, the old pending task queue become the active one.
+    ** That queue then get processed by invoking all packaged_task it contains.
+    ** If no tasks are contained in the active task queue, the calling thread is caused to yield.
+    **
+    ** This function does not returns.
+    */
+    void Dispatcher::_processOrYield() {
+        int sel;
+        {
+            std::scoped_lock sl(_tasks_mu);
+            sel = _tasks_sel;
+            _tasks_sel ^= 1;
+        }
+
+        if (0 != _tasks[sel].size())
+            std::for_each(_tasks[sel].begin(), _tasks[sel].end(), [](auto &task) { task(); });
+        else
+            std::this_thread::yield();
+
+        _tasks[sel].clear();
+    }
 
     /**
     ** \brief Synchronously dispatch an event.
@@ -515,54 +646,6 @@ namespace clonixin::event::async {
         } catch (std::out_of_range) {}
     }
 
-    /**
-    ** \brief Adds a task to register the callback.
-    **
-    ** This function adds a new task to register a callback to a type of event, then returns a future on an handle.
-    **
-    ** \tparam EvType Type of events to register to.
-    ** \tparam CallbackFunction Type of the callback. CallbackFunction must be invocable with EvType.
-    **
-    ** \param [in] callback The callback that'll be called when an event EvType will be dispatched.
-    **
-    ** \return Returns an std::future<Dispatcher::Handle> that will contains the callback handle when it'll be registered.
-    */
-    template <class EvType, typename CallbackFunction>
-    std::future<Dispatcher::Handle> Dispatcher::registerCallback(CallbackFunction callback) {
-        static_assert(std::is_invocable_v<CallbackFunction, EvType>, "Callback should be invocable with EvType.");
-
-        auto doRegister = [&, callback] {
-            return _doRegister<EvType>(callback);
-        };
-
-        return _pushTask<Handle>(doRegister);
-    }
-
-    /**
-    ** \brief Adds a task to un-register a callback.
-    **
-    ** This function adds a new task that will unregister the callback represented by \c hndl.
-    **
-    ** \param [in] hndl A Dispatcher::Handle previously returned by Dispatcher::registerCallback.
-    **
-    ** \returns A std::future in case something threw in the unregistration process, and the user want to handle the exception.
-    */
-    std::future<void> Dispatcher::unregisterCallback(Handle hndl) {
-        std::function<void()> doUnregister = [&, hndl] {
-            try {
-                auto meta = _meta_list.at(hndl.type);
-                meta.unreg(hndl.id);
-            } catch (std::out_of_range) {}
-        };
-
-        return _pushTask<void>(doUnregister);
-    }
-    /**@}*/
-
-    /**
-    ** \name Private member functions
-    */
-    /**@{*/
     /**
     ** \brief Private function that start a thread if none were running.
     **
