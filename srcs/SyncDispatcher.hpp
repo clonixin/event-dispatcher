@@ -28,6 +28,16 @@ namespace clonixin::event {
         size_t const id; ///< Id of the callback.
     };
 
+    const handle nil_handle { typeid(nullptr), (size_t)-1 };
+
+    bool operator==(handle const & lhs, handle const &rhs) {
+        return lhs.type == rhs.type && lhs.id == rhs.id;
+    }
+
+    bool operator!=(handle const & lhs, handle const &rhs) {
+        return !(lhs == rhs);
+    }
+
     /*
     ** \brief Event Dispatcher class.
     **
@@ -51,7 +61,7 @@ namespace clonixin::event {
         */
         struct _TypeMeta {
             size_t id_list = 0; ///< This Id is used to assign an ID to a callback
-            std::function<void(size_t, std::any)> unreg; ///< Callback unregistration function.
+            std::function<void(size_t, std::any&)> unreg; ///< Callback unregistration function.
         };
 
         /**
@@ -82,7 +92,7 @@ namespace clonixin::event {
             SyncDispatcher const & dispatch(ExecutionPolicy && policy,EvType ev) const;
 
             template <class EvType, typename CallbackFunction>
-            [[nodiscard]] handle registeredCallback(CallbackFunction callback);
+            [[nodiscard]] handle registerCallback(CallbackFunction callback);
             SyncDispatcher &unregisterCallback(handle hndl);
 
         private:
@@ -146,7 +156,7 @@ namespace clonixin::event {
     SyncDispatcher const & SyncDispatcher::dispatch(EvType ev) const {
         try {
             std::type_index ti(typeid(EvType));
-            _CallbackList<EvType> list = std::any_cast<_CallbackList<EvType>>(_callback_list.at(ti));
+            _CallbackList<EvType> const &list = std::any_cast<_CallbackList<EvType> const &>(_callback_list.at(ti));
 
             auto unar = [&, ev] (_CallbackWrap<EvType> meta) {
                 auto [id, fun] = meta;
@@ -230,7 +240,7 @@ namespace clonixin::event {
     ** \return Returns a events::handle that will allow to unregister the event..
     */
     template <class EvType, typename CallbackFunction>
-    handle SyncDispatcher::registeredCallback(CallbackFunction callback) {
+    handle SyncDispatcher::registerCallback(CallbackFunction callback) {
         static_assert(std::is_invocable_v<CallbackFunction, EvType>, "Callback should be invocable with EvType.");
         std::type_index ti(typeid(EvType));
 
