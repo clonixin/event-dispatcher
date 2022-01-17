@@ -1,9 +1,9 @@
 /**
-** \file AsyncDispatcher.hpp
+** \file async_dispatcher.hpp
 **
 ** \author Phantomas <phantomas@phantomas.xyz>
 ** \date Created on: 2020-11-23 23:37
-** \date Last update: 2022-01-11 11:46
+** \date Last update: 2022-01-17 11:26
 ** \copyright GNU Lesser Public Licence v3
 */
 
@@ -13,7 +13,7 @@
 #include <future>
 #include <utility>
 
-#include "./SyncDispatcher.hpp"
+#include "./sync_dispatcher.hpp"
 
 namespace clonixin::events {
     /**
@@ -66,17 +66,17 @@ namespace clonixin::events {
     **      Auto-unregistering callbacks are planned.
     ** \endparblock
     */
-    class AsyncDispatcher {
+    class async_dispatcher {
             using _TaskQueue = std::vector<std::packaged_task<void ()>>;
         public:
-            AsyncDispatcher();
-            AsyncDispatcher(AsyncDispatcher const &) = delete;
-            AsyncDispatcher(AsyncDispatcher &&) = delete;
-            AsyncDispatcher(SyncDispatcher &&);
-            ~AsyncDispatcher();
+            async_dispatcher();
+            async_dispatcher(async_dispatcher const &) = delete;
+            async_dispatcher(async_dispatcher &&) = delete;
+            async_dispatcher(sync_dispatcher &&);
+            ~async_dispatcher();
 
-            AsyncDispatcher &operator=(AsyncDispatcher const &) = delete;
-            AsyncDispatcher &operator=(AsyncDispatcher &&) = delete;
+            async_dispatcher &operator=(async_dispatcher const &) = delete;
+            async_dispatcher &operator=(async_dispatcher &&) = delete;
 
             [[nodiscard]] bool run(no_yield_t);
             [[nodiscard]] bool run(yield_t = yield);
@@ -90,9 +90,9 @@ namespace clonixin::events {
             [[nodiscard]] bool process(yield_t t);
 
             template <class EvType>
-            AsyncDispatcher &pushEvent(EvType);
+            async_dispatcher &pushEvent(EvType);
             template <class ExecutionPolicy, class EvType>
-            AsyncDispatcher &pushEvent(ExecutionPolicy &&policy, EvType ev);
+            async_dispatcher &pushEvent(ExecutionPolicy &&policy, EvType ev);
 
             template <class EvType, typename CallbackFunction>
             [[nodiscard]] std::future<handle> registerCallback(CallbackFunction callback);
@@ -106,7 +106,7 @@ namespace clonixin::events {
             template <class Ret, class Task>
             [[nodiscard]] std::future<Ret> _pushTask(Task &&task);
         private:
-            SyncDispatcher _dispatcher; ///< SyncDispatcher used as a backend for dispatching events.
+            sync_dispatcher _dispatcher; ///< sync_dispatcher used as a backend for dispatching events.
 
             std::mutex _thread_mu; ///< Protect thread management
             std::atomic_bool _running; ///< Atomic boolean that store the thread status
@@ -125,24 +125,24 @@ namespace clonixin::events {
     /**
     ** \brief Default constructor
     */
-    AsyncDispatcher::AsyncDispatcher():
+    async_dispatcher::async_dispatcher():
         _dispatcher(),
         _thread_mu(), _running(false), _process_mu(), _run_thread(),
         _tasks_mu(), _tasks_sel(0), _tasks()
     {}
 
     /**
-    ** \brief Construct a new AsyncDispatcher by taking a SyncDispatcher rvalue.
+    ** \brief Construct a new async_dispatcher by taking a sync_dispatcher rvalue.
     **
-    ** \param dispatcher SyncDispatcher to use for task processing.
+    ** \param dispatcher sync_dispatcher to use for task processing.
     */
-    AsyncDispatcher::AsyncDispatcher(SyncDispatcher &&dispatcher):
+    async_dispatcher::async_dispatcher(sync_dispatcher &&dispatcher):
         _dispatcher(std::move(dispatcher)),
         _thread_mu(), _running(false), _process_mu(), _run_thread(),
         _tasks_mu(), _tasks_sel(0), _tasks()
     {}
 
-    AsyncDispatcher::~AsyncDispatcher() {
+    async_dispatcher::~async_dispatcher() {
         (void)stop();
     }
     /**@}*/
@@ -163,7 +163,7 @@ namespace clonixin::events {
     **
     ** \return \c true if a thread has been spawned, \c false otherwise.
     */
-    bool AsyncDispatcher::run(no_yield_t t) {
+    bool async_dispatcher::run(no_yield_t t) {
         auto fun = [&] {
             std::scoped_lock l(_process_mu);
             while (_running.load()) {
@@ -185,7 +185,7 @@ namespace clonixin::events {
     **
     ** \return \c true if a thread has been spawned, \c false otherwise.
     */
-    bool AsyncDispatcher::run(yield_t t) {
+    bool async_dispatcher::run(yield_t t) {
         auto fun = [&] {
             std::scoped_lock l(_process_mu);
             while (_running.load()) {
@@ -212,7 +212,7 @@ namespace clonixin::events {
     ** \return \c true if a thread has been spawned, \c false otherwise.
     */
     template <class Rep, class Period>
-    bool AsyncDispatcher::run(std::chrono::duration<Rep, Period> timeout) {
+    bool async_dispatcher::run(std::chrono::duration<Rep, Period> timeout) {
         auto fun = [&, timeout] {
             auto _start_time = std::chrono::steady_clock::now();
             auto _next_tick = _start_time + timeout;
@@ -237,7 +237,7 @@ namespace clonixin::events {
     **
     ** \return \c true if a thread was running and no other thread was trying to stop it. \c false is returned otherwise.
     */
-    bool AsyncDispatcher::stop() {
+    bool async_dispatcher::stop() {
         std::unique_lock lock(_thread_mu);
 
         if (!lock || !_running.load())
@@ -262,7 +262,7 @@ namespace clonixin::events {
     **
     ** \return If no other call to process is running, returns \c true. \c false is returned otherwise.
     */
-    bool AsyncDispatcher::process(no_yield_t t) {
+    bool async_dispatcher::process(no_yield_t t) {
         std::unique_lock locked(_process_mu, std::try_to_lock);
 
         if (locked)
@@ -285,7 +285,7 @@ namespace clonixin::events {
     **
     ** \return If no other call to process is running, returns \c true. \c false is returned otherwise.
     */
-    bool AsyncDispatcher::process(yield_t t) {
+    bool async_dispatcher::process(yield_t t) {
         std::unique_lock locked(_process_mu, std::try_to_lock);
 
 
@@ -310,7 +310,7 @@ namespace clonixin::events {
     ** \return \c *this
     */
     template <class EvType>
-    AsyncDispatcher &AsyncDispatcher::pushEvent(EvType ev) {
+    async_dispatcher &async_dispatcher::pushEvent(EvType ev) {
         auto doDispatch = [&, ev] {
             _dispatcher.dispatch(ev);
         };
@@ -322,7 +322,7 @@ namespace clonixin::events {
     /**
     ** \brief Adds an event dispatching task.
     **
-    ** The new task will call SyncDispatcher::dispatch(policy, ev);
+    ** The new task will call sync_dispatcher::dispatch(policy, ev);
     **
     ** \tparam ExecutionPolicy Type of execution policy.
     ** \tparam EvType Type of the event that'll be dispatch on next call to process.
@@ -333,7 +333,7 @@ namespace clonixin::events {
     ** \return \c *this
     */
     template <class ExecutionPolicy, class EvType>
-    AsyncDispatcher &AsyncDispatcher::pushEvent(ExecutionPolicy &&policy, EvType ev) {
+    async_dispatcher &async_dispatcher::pushEvent(ExecutionPolicy &&policy, EvType ev) {
         auto doDispatch = [&, ev, policy] {
             _dispatcher.dispatch(std::move(policy), ev);
         };
@@ -360,7 +360,7 @@ namespace clonixin::events {
     ** \return Returns an std::future<Dispatcher::Handle> that will contains the callback handle when it'll be registered.
     */
     template <class EvType, typename CallbackFunction>
-    std::future<handle> AsyncDispatcher::registerCallback(CallbackFunction callback) {
+    std::future<handle> async_dispatcher::registerCallback(CallbackFunction callback) {
         static_assert(std::is_invocable_v<CallbackFunction, EvType>, "Callback should be invocable with EvType.");
 
         auto doRegister = [&, callback] {
@@ -379,7 +379,7 @@ namespace clonixin::events {
     **
     ** \returns A std::future in case something threw in the unregistration process, and the user want to handle the exception.
     */
-    std::future<void> AsyncDispatcher::unregisterCallback(handle hndl) {
+    std::future<void> async_dispatcher::unregisterCallback(handle hndl) {
         std::function<void()> doUnregister = [&, hndl] {
             _dispatcher.unregisterCallback(hndl);
         };
@@ -400,7 +400,7 @@ namespace clonixin::events {
     ** \return \c true if a thread was started by this call, \c false otherwise
     */
     template <typename Function>
-    bool AsyncDispatcher::_startThread(Function &&fun) {
+    bool async_dispatcher::_startThread(Function &&fun) {
         std::unique_lock lock(_thread_mu, std::try_to_lock);
 
         if (!lock || _running.load())
@@ -423,7 +423,7 @@ namespace clonixin::events {
     **
     ** This function does not returns.
     */
-    void AsyncDispatcher::_process([[maybe_unused]] no_yield_t t) {
+    void async_dispatcher::_process([[maybe_unused]] no_yield_t t) {
         int sel;
         {
             std::scoped_lock sl(_tasks_mu);
@@ -450,7 +450,7 @@ namespace clonixin::events {
     **
     ** This function does not returns.
     */
-    void AsyncDispatcher::_process([[maybe_unused]] yield_t t) {
+    void async_dispatcher::_process([[maybe_unused]] yield_t t) {
         int sel;
         {
             std::scoped_lock sl(_tasks_mu);
@@ -477,7 +477,7 @@ namespace clonixin::events {
     ** \return Returns a std::future<Ret> that will contains the content of the task when it'll be executed.
     */
     template <class Ret, class Task>
-    std::future<Ret> AsyncDispatcher::_pushTask(Task &&fun) {
+    std::future<Ret> async_dispatcher::_pushTask(Task &&fun) {
         static_assert(std::is_invocable_r_v<Ret, Task>, "Task take should return Ret when and be invocable without argument.");
         std::packaged_task<Ret()> task(std::forward<Task>(fun));
         auto future = task.get_future();

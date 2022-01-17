@@ -1,9 +1,9 @@
 /**
-** \file SyncDispatcher.hpp
+** \file sync_dispatcher.hpp
 **
 ** \author Phantomas <phantomas@phantomas.xyz>
 ** \date Created on: 2020-11-22 23:08
-** \date Last update: 2022-01-11 11:46
+** \date Last update: 2022-01-17 11:25
 ** \copyright GNU Lesser Public Licence v3
 */
 
@@ -49,13 +49,13 @@ namespace clonixin::events {
     **   Callbacks are simples functions called when an event is dispatched. They must take one argument, the event, and should not return.
     **
     **   \b Registration: \n
-    **      A callback is registered by calling SyncDispatcher::registerCallback<EvType>\n
+    **      A callback is registered by calling sync_dispatcher::registerCallback<EvType>\n
     **      This will return a event::handle, that'll be used to unregister that specific callback, if needed.
     **
     **   \b Unregistration: \n
-    **      To unregister a callback, you just have to call SyncDispatcher::unregisterCallback providing it with the necessary handle.
+    **      To unregister a callback, you just have to call sync_dispatcher::unregisterCallback providing it with the necessary handle.
     */
-    class SyncDispatcher {
+    class sync_dispatcher {
         /**
         ** \brief Metadatas for callback handling
         */
@@ -75,25 +75,25 @@ namespace clonixin::events {
             using _CallbackList = std::vector<_CallbackWrap<EvType>>;
         /**@}*/
         public:
-            SyncDispatcher();
-            SyncDispatcher(SyncDispatcher &&) noexcept;
-            ~SyncDispatcher();
+            sync_dispatcher();
+            sync_dispatcher(sync_dispatcher &&) noexcept;
+            ~sync_dispatcher();
 
-            SyncDispatcher & operator=(SyncDispatcher &&) noexcept;
+            sync_dispatcher & operator=(sync_dispatcher &&) noexcept;
 
             template <class EvType>
-            SyncDispatcher & dispatch(EvType ev);
+            sync_dispatcher & dispatch(EvType ev);
             template <class EvType>
-            SyncDispatcher const & dispatch(EvType ev) const;
+            sync_dispatcher const & dispatch(EvType ev) const;
 
             template <class ExecutionPolicy, class EvType>
-            SyncDispatcher & dispatch(ExecutionPolicy && policy, EvType ev);
+            sync_dispatcher & dispatch(ExecutionPolicy && policy, EvType ev);
             template <class ExecutionPolicy, class EvType>
-            SyncDispatcher const & dispatch(ExecutionPolicy && policy,EvType ev) const;
+            sync_dispatcher const & dispatch(ExecutionPolicy && policy,EvType ev) const;
 
             template <class EvType, typename CallbackFunction>
             [[nodiscard]] handle registerCallback(CallbackFunction callback);
-            SyncDispatcher &unregisterCallback(handle hndl);
+            sync_dispatcher &unregisterCallback(handle hndl);
 
         private:
             std::unordered_map<std::type_index, std::any> _callback_list; ///< Map of vector of callback, indexed by event types.
@@ -104,13 +104,13 @@ namespace clonixin::events {
     ** \name Public Member Functions
     */
     /**@{*/
-    SyncDispatcher::SyncDispatcher() {}
-    SyncDispatcher::SyncDispatcher(SyncDispatcher && oth) noexcept
+    sync_dispatcher::sync_dispatcher() {}
+    sync_dispatcher::sync_dispatcher(sync_dispatcher && oth) noexcept
     : _callback_list(std::move(oth._callback_list)), _meta_list(std::move(oth._meta_list)) {}
 
-    SyncDispatcher::~SyncDispatcher() {}
+    sync_dispatcher::~sync_dispatcher() {}
 
-    SyncDispatcher & SyncDispatcher::operator=(SyncDispatcher &&oth) noexcept {
+    sync_dispatcher & sync_dispatcher::operator=(sync_dispatcher &&oth) noexcept {
         if (std::addressof(oth) != this) {
             _callback_list = std::move(oth._callback_list);
             _meta_list = std::move(oth._meta_list);
@@ -136,8 +136,8 @@ namespace clonixin::events {
     ** \return \c *this
     */
     template <class EvType>
-    SyncDispatcher & SyncDispatcher::dispatch(EvType ev) {
-        ((SyncDispatcher const *)this)->dispatch(ev);
+    sync_dispatcher & sync_dispatcher::dispatch(EvType ev) {
+        ((sync_dispatcher const *)this)->dispatch(ev);
         return *this;
     }
 
@@ -153,7 +153,7 @@ namespace clonixin::events {
     ** \return \c *this
     */
     template <class EvType>
-    SyncDispatcher const & SyncDispatcher::dispatch(EvType ev) const {
+    sync_dispatcher const & sync_dispatcher::dispatch(EvType ev) const {
         try {
             std::type_index ti(typeid(EvType));
             _CallbackList<EvType> const &list = std::any_cast<_CallbackList<EvType> const &>(_callback_list.at(ti));
@@ -185,8 +185,8 @@ namespace clonixin::events {
     ** \return \c *this
     */
     template <class ExecutionPolicy, class EvType>
-    SyncDispatcher & SyncDispatcher::dispatch(ExecutionPolicy && policy, EvType ev) {
-        ((SyncDispatcher const *)this)->dispatch(policy, ev);
+    sync_dispatcher & sync_dispatcher::dispatch(ExecutionPolicy && policy, EvType ev) {
+        ((sync_dispatcher const *)this)->dispatch(policy, ev);
         return *this;
     }
 
@@ -206,7 +206,7 @@ namespace clonixin::events {
     ** \return \c *this
     */
     template <class ExecutionPolicy, class EvType>
-    SyncDispatcher const & SyncDispatcher::dispatch(ExecutionPolicy && policy,EvType ev) const {
+    sync_dispatcher const & sync_dispatcher::dispatch(ExecutionPolicy && policy,EvType ev) const {
         try {
             std::type_index ti(typeid(EvType));
             _CallbackList<EvType> list = std::any_cast<_CallbackList<EvType>>(_callback_list.at(ti));
@@ -240,7 +240,7 @@ namespace clonixin::events {
     ** \return Returns a events::handle that will allow to unregister the event..
     */
     template <class EvType, typename CallbackFunction>
-    handle SyncDispatcher::registerCallback(CallbackFunction callback) {
+    handle sync_dispatcher::registerCallback(CallbackFunction callback) {
         static_assert(std::is_invocable_v<CallbackFunction, EvType>, "Callback should be invocable with EvType.");
         std::type_index ti(typeid(EvType));
 
@@ -269,11 +269,11 @@ namespace clonixin::events {
     **
     ** This function unregister the callback represented by \c hndl.
     **
-    ** \param [in] hndl A event::handle previously returned by SyncDispatcher::registerCallback.
+    ** \param [in] hndl A event::handle previously returned by sync_dispatcher::registerCallback.
     **
     ** \return \c *this.
     */
-    SyncDispatcher & SyncDispatcher::unregisterCallback(handle hndl) {
+    sync_dispatcher & sync_dispatcher::unregisterCallback(handle hndl) {
         try {
             auto meta = _meta_list.at(hndl.type);
             meta.unreg(hndl.id, _callback_list.at(hndl.type));
