@@ -3,7 +3,7 @@
 **
 ** \author Phantomas <phantomas@phantomas.xyz>
 ** \date Created on: 2020-11-22 23:08
-** \date Last update: 2020-11-24 01:57
+** \date Last update: 2022-01-11 11:46
 ** \copyright GNU Lesser Public Licence v3
 */
 
@@ -17,7 +17,7 @@
 #include <typeindex>
 #include <unordered_map>
 
-namespace clonixin::event {
+namespace clonixin::events {
     /**
     ** \brief Refer to a registered callback.
     **

@@ -3,7 +3,7 @@
 **
 ** \author Phantomas <phantomas@phantomas.xyz>
 ** \date Created on: 2020-11-23 23:37
-** \date Last update: 2020-11-24 01:58
+** \date Last update: 2022-01-11 11:46
 ** \copyright GNU Lesser Public Licence v3
 */
 
@@ -15,7 +15,7 @@
 
 #include "./SyncDispatcher.hpp"
 
-namespace clonixin::event {
+namespace clonixin::events {
     /**
     ** \brief Empty class tag type used to specify that the dispatcher should yield when the task list is empty;
     */
